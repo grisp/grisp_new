@@ -227,7 +227,7 @@ defmodule GrispNew.Configure do
     grisp_io_deps =
       if config[:grisp_io],
         do:
-          "\n      {:certifi, \">= 0.0.0\"},\n      {:grisp_cryptoauth, \"~> 2.6\"},\n      {:grisp_updater_grisp2, \"~> 1.0\", runtime: false},\n      {:grisp_connect, \"~> 3.0.0\"},",
+          "\n      {:certifi, \">= 0.0.0\"},\n      {:grisp_cryptoauth, \"~> 2.6\"},\n      {:grisp_updater_grisp2, \"~> 1.0\", runtime: false},\n      {:grisp_connect, \"~> 3.0.0\"},\n      {:mix_grisp_io, \"~> 1.0\", runtime: false},",
         else: ""
 
     grisp_dep =

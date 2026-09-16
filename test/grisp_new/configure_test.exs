@@ -185,13 +185,14 @@ defmodule GrispNew.ConfigureTest do
     files = Path.join(project, "grisp/grisp2/common/deploy/files")
     grisp_ini = File.read!(Path.join(files, "grisp.ini.mustache"))
 
-    for dependency <- ~w(certifi grisp_cryptoauth grisp_updater_grisp2 grisp_connect) do
+    for dependency <- ~w(certifi grisp_cryptoauth grisp_updater_grisp2 grisp_connect mix_grisp_io) do
       assert mix_exs =~ ":#{dependency}"
     end
 
     assert mix_exs =~ ~s({:grisp_cryptoauth, "~> 2.6"})
     assert mix_exs =~ ~s({:grisp_connect, "~> 3.0.0"})
     assert mix_exs =~ ~s({:grisp_updater_grisp2, "~> 1.0", runtime: false})
+    assert mix_exs =~ ~s({:mix_grisp_io, "~> 1.0", runtime: false})
     assert mix_exs =~ ~s({:grisp, "~> 2.12", override: true})
     assert mix_exs =~ "applications: [sasl: :permanent, grisp_updater_grisp2: :load]"
 
