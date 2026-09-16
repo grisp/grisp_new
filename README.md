@@ -15,7 +15,7 @@ mix archive.install hex grisp_new
 Install a specific release with:
 
 ```console
-mix archive.install hex grisp_new 1.0.0
+mix archive.install hex grisp_new
 ```
 
 ## Usage
