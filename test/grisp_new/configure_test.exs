@@ -1,6 +1,15 @@
 defmodule GrispNew.ConfigureTest do
   use ExUnit.Case, async: false
 
+  defmodule HostRustler do
+    defmacro __using__(_opts) do
+      quote do
+        @on_load :host_load
+        def host_load, do: {:error, :unexpected_host_nif_load}
+      end
+    end
+  end
+
   setup do
     previous_shell = Mix.shell()
     Mix.shell(Mix.Shell.Process)
@@ -26,6 +35,8 @@ defmodule GrispNew.ConfigureTest do
         name: "demo",
         otp_version: "29",
         jit: true,
+        rust: false,
+        c_nif: false,
         dest: "/tmp/grisp",
         wifi: false,
         grisp_io: false,
@@ -74,6 +85,8 @@ defmodule GrispNew.ConfigureTest do
           name: "",
           otp_version: "29",
           jit: true,
+          rust: false,
+          c_nif: false,
           dest: "/tmp/grisp",
           wifi: false,
           grisp_io: false,
@@ -95,6 +108,8 @@ defmodule GrispNew.ConfigureTest do
         name: "demo",
         otp_version: "29",
         jit: true,
+        rust: false,
+        c_nif: false,
         dest: "/tmp/grisp",
         grisp_io: false,
         epmd: false
@@ -116,6 +131,8 @@ defmodule GrispNew.ConfigureTest do
         name: "demo",
         otp_version: "29",
         jit: true,
+        rust: false,
+        c_nif: false,
         dest: "/tmp/grisp",
         wifi: false,
         grisp_io: false,
@@ -144,6 +161,93 @@ defmodule GrispNew.ConfigureTest do
     assert grisp_ini =~ "-user elixir -extra +iex --no-halt"
     assert grisp_ini =~ "on_exit = reboot"
     assert grisp_ini =~ "on_crash = reboot"
+    refute File.exists?(Path.join(result.root, "native/Cargo.toml"))
+    refute File.read!(Path.join(result.root, "mix.exs")) =~ ":cargo"
+  end
+
+  test "generates Rust sources and build-only dependencies when requested", %{root: root} do
+    File.cd!(root, fn ->
+      Mix.Task.reenable("grisp.new")
+      Mix.Tasks.Grisp.New.run(["--no-interactive", "--name", "rust_demo", "--rust"])
+    end)
+
+    project = Path.join(root, "rust_demo")
+    mix = File.read!(Path.join(project, "mix.exs"))
+    assert mix =~ "https://github.com/grisp/erlang-cargo.git"
+    assert mix =~ ~s(branch: "cross_build_support_0_1_3")
+    assert mix =~ ~s({:rustler, "~> 0.38.0", runtime: false})
+    assert mix =~ ~s(cargo_opts: [src_dir: "native"])
+    assert mix =~ "build: [toolchain:"
+    assert mix =~ "preferred_envs:"
+    assert mix =~ ~s|System.put_env("GRISP", "yes")|
+    assert {:ok, _} = Code.string_to_quoted(mix)
+
+    assert File.read!(Path.join(project, "native/rust_demo_native/src/lib.rs")) =~
+             ~s|rustler::init!("Elixir.RustDemo.RustNif")|
+
+    wrapper = File.read!(Path.join(project, "lib/rust_demo/rust_nif.ex"))
+    assert wrapper =~ "defmodule RustDemo.RustNif"
+    assert wrapper =~ "if @grisp_target do"
+    assert wrapper =~ "{:unix, :rtems}"
+    refute File.exists?(Path.join(project, "lib/rust_demo/native.ex"))
+    assert File.read!(Path.join(project, "native/Cargo.toml")) =~ "rust_demo_native"
+  end
+
+  test "loads the C NIF directly in Elixir with the static init symbol expected by OTP", %{
+    root: root
+  } do
+    File.cd!(root, fn ->
+      Mix.Task.reenable("grisp.new")
+      Mix.Tasks.Grisp.New.run(["--no-interactive", "--name", "c_demo", "--c-nif"])
+    end)
+
+    project = Path.join(root, "c_demo")
+    source = File.read!(Path.join(project, "grisp/default/common/build/nifs/c_demo_c_nif.c"))
+    assert source =~ "#define STATIC_ERLANG_NIF_LIBNAME c_demo_c"
+    assert source =~ "ERL_NIF_INIT(Elixir.CDemo.CNif,"
+    refute File.exists?(Path.join(project, "src/c_demo_c_nif.erl"))
+    wrapper = File.read!(Path.join(project, "lib/c_demo/c_nif.ex"))
+    assert wrapper =~ "defmodule CDemo.CNif"
+    assert wrapper =~ "@on_load :load_nif"
+    assert wrapper =~ ":erlang.load_nif(:erlang.atom_to_list(__MODULE__), 0)"
+    assert {:ok, _} = Code.string_to_quoted(wrapper)
+  end
+
+  test "target Rust wrapper cold-loads on the host without loading a shared NIF", %{root: root} do
+    previous = System.get_env("GRISP")
+    module = ColdLoadDemo.RustNif
+
+    try do
+      result =
+        File.cd!(root, fn ->
+          GrispNew.Configure.run(interactive: false, name: "cold_load_demo", rust: true)
+        end)
+
+      source = Path.join(result.root, "lib/cold_load_demo/rust_nif.ex")
+
+      wrapper =
+        source
+        |> File.read!()
+        |> String.replace("use Rustler,", "use GrispNew.ConfigureTest.HostRustler,")
+
+      System.put_env("GRISP", "yes")
+      [{^module, beam}] = Code.compile_string(wrapper, source)
+      assert apply(module, :load_nif, []) == :ok
+      refute apply(module, :__mix_recompile__?, [])
+      :code.purge(module)
+      :code.delete(module)
+      assert {:module, ^module} = :code.load_binary(module, String.to_charlist(source), beam)
+      refute apply(module, :__mix_recompile__?, [])
+      System.delete_env("GRISP")
+      assert apply(module, :__mix_recompile__?, [])
+    after
+      :code.purge(module)
+      :code.delete(module)
+
+      if previous,
+        do: System.put_env("GRISP", previous),
+        else: System.delete_env("GRISP")
+    end
   end
 
   test "enables Wi-Fi when either credential is supplied", %{root: root} do
@@ -160,6 +264,57 @@ defmodule GrispNew.ConfigureTest do
       assert grisp_ini =~ "wpa=wpa_supplicant.conf"
       assert File.exists?(Path.join(files, "wpa_supplicant.conf"))
     end
+  end
+
+  test "preserves quoted text in generated Mix configuration", %{root: root} do
+    description = ~S(GRiSP "Demo" customer's \lab #{literal}) <> " café"
+    destination = ~S(/media/GRiSP "card"\test)
+    author = ~S(Sébastien "Merle")
+
+    result =
+      File.cd!(root, fn ->
+        GrispNew.Configure.run(
+          interactive: false,
+          name: "quoted_demo",
+          desc: description,
+          dest: destination,
+          author_name: author,
+          author_email: "author@example.org"
+        )
+      end)
+
+    config = Mix.Project.in_project(:quoted_demo, result.root, fn _ -> Mix.Project.config() end)
+    assert config[:description] == description
+    assert config[:grisp][:deploy][:destination] == destination
+    assert config[:package][:maintainers] == ["#{author} <author@example.org>"]
+  end
+
+  test "preserves Wi-Fi quotes and backslashes as WPA data", %{root: root} do
+    ssid = ~S("__WLAN_PASSWORD__"\#{network})
+    password = ~S(pa"ss\word#{literal}__WLAN_SSID__)
+
+    result =
+      File.cd!(root, fn ->
+        GrispNew.Configure.run(
+          interactive: false,
+          name: "wifi_demo",
+          ssid: ssid,
+          psk: password,
+          epmd: true,
+          cookie: "__WIFI_CONFIG__"
+        )
+      end)
+
+    wpa =
+      File.read!(Path.join(result.root, "grisp/grisp2/common/deploy/files/wpa_supplicant.conf"))
+
+    assert wpa =~ ~s(ssid="#{ssid}")
+    assert wpa =~ ~s(psk="#{password}")
+
+    ini =
+      File.read!(Path.join(result.root, "grisp/grisp2/common/deploy/files/grisp.ini.mustache"))
+
+    assert ini =~ "-setcookie __WIFI_CONFIG__"
   end
 
   test "generates a bootable GRiSP.io release configuration", %{root: root} do

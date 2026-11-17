@@ -3,10 +3,10 @@ name: CI
 on:
   push:
     branches:
-      - master
+      - main
   pull_request:
     branches:
-      - master
+      - main
 
 permissions:
   contents: read
@@ -39,6 +39,9 @@ jobs:
 
       - name: Check formatting
         run: mix format --check-formatted
+
+      - name: Fetch locked dependencies
+        run: mix deps.get --check-locked
 
       - name: Compile archive
         run: mix compile --warnings-as-errors
