@@ -6,6 +6,8 @@ defmodule GrispNew.Configure do
     name: "robot",
     otp_version: "29",
     jit: true,
+    rust: false,
+    c_nif: false,
     dest: "/path/to/SD-card",
     desc: "A GRiSP application",
     copyright_year: nil,
@@ -55,7 +57,9 @@ defmodule GrispNew.Configure do
         ),
         write(Path.join(root, "README.md"), project_readme(config), project_exists?),
         write(Path.join(root, "LICENSE"), license(config), project_exists?)
-      ] ++ network_files(root, config, project_exists?)
+      ] ++
+        network_files(root, config, project_exists?) ++
+        native_files(root, config, project_exists?) ++ rust_files(root, config, project_exists?)
 
     created = Enum.reject(created, &is_nil/1)
 
@@ -75,6 +79,8 @@ defmodule GrispNew.Configure do
       |> ask_valid_name_unless_supplied(supplied)
       |> ask_unless_supplied(supplied, :otp_version, "Erlang/OTP version", &identity/1)
       |> ask_bool_unless_supplied(supplied, :jit, "Enable the Arm32 JIT patches?")
+      |> ask_bool_unless_supplied(supplied, :rust, "Enable Rust NIF support?")
+      |> ask_bool_unless_supplied(supplied, :c_nif, "Enable C NIF support?")
       |> ask_unless_supplied(supplied, :dest, "SD card path", &identity/1)
       |> prompt_features(supplied)
     else
@@ -216,6 +222,45 @@ defmodule GrispNew.Configure do
 
   defp mix_exs(config) do
     module = Macro.camelize(config[:name])
+    native? = config[:rust] or config[:c_nif]
+    cargo_config = if config[:rust], do: "\n      cargo_opts: [src_dir: \"native\"],", else: ""
+
+    rust_environment =
+      if native?,
+        do: """
+
+            if Mix.env() == :grisp do
+              System.put_env("GRISP", "yes")
+              System.put_env("GRISP_PLATFORM", to_string(grisp()[:platform]))
+            end
+        """,
+        else: ""
+
+    rust_cli =
+      if native?,
+        do: """
+
+          def cli do
+            [preferred_envs: ["grisp.build": :grisp, "grisp.deploy": :grisp,
+                              "grisp.firmware": :grisp, "grisp.pack": :grisp]]
+          end
+        """,
+        else: ""
+
+    rust_deps =
+      if config[:rust],
+        do: """
+
+              {:rustler, "~> 0.38.0", runtime: false},
+              {:cargo, git: "https://github.com/grisp/erlang-cargo.git", branch: "cross_build_support_0_1_3", runtime: false},
+        """,
+        else: ""
+
+    rust_build =
+      if native?,
+        do: "\n      build: [toolchain: [docker: \"grisp/grisp2-rtems-toolchain:latest\"]],",
+        else: ""
+
     included_epmd = if config[:epmd], do: ", included_applications: [:epmd]", else: ""
 
     epmd_dep =
@@ -244,7 +289,7 @@ defmodule GrispNew.Configure do
     defmodule #{module}.MixProject do
       use Mix.Project
 
-      def project do
+      def project do#{rust_environment}
         [
           app: :#{config[:name]},
           version: "0.1.0",
@@ -255,18 +300,19 @@ defmodule GrispNew.Configure do
             maintainers: [#{inspect("#{config[:author_name]} <#{config[:author_email]}>")}]
           ],
           start_permanent: Mix.env() == :prod,
-          deps: deps(),
+          deps: deps(),#{cargo_config}
           grisp: grisp(),
           releases: releases()
         ]
       end
 
+    #{rust_cli}
       def application do
         [extra_applications: [:logger]#{included_epmd}, mod: {#{module}.Application, []}]
       end
 
       defp deps do
-        [#{epmd_dep}#{grisp_io_deps}
+        [#{epmd_dep}#{grisp_io_deps}#{rust_deps}
           #{grisp_dep},
           {:mix_grisp, "~> 1.0", runtime: false}
         ]
@@ -275,7 +321,7 @@ defmodule GrispNew.Configure do
       defp grisp do
         [
           platform: :grisp2,
-          otp: [version: #{inspect(config[:otp_version])}, jit: #{config[:jit]}],
+          otp: [version: #{inspect(config[:otp_version])}, jit: #{config[:jit]}],#{rust_build}
           deploy: [destination: #{inspect(config[:dest])}]
         ]
       end
@@ -329,16 +375,20 @@ defmodule GrispNew.Configure do
 
     "grisp/grisp2/common/deploy/files/grisp.ini.mustache"
     |> template()
-    |> String.replace("__EPMD_ARGS__", epmd)
-    |> String.replace("__GRISP_IO_ARGS__", grisp_io)
-    |> String.replace("__WIFI_CONFIG__", wifi)
+    |> String.replace(["__EPMD_ARGS__", "__GRISP_IO_ARGS__", "__WIFI_CONFIG__"], fn
+      "__EPMD_ARGS__" -> epmd
+      "__GRISP_IO_ARGS__" -> grisp_io
+      "__WIFI_CONFIG__" -> wifi
+    end)
   end
 
   defp wpa(config) do
     "grisp/grisp2/common/deploy/files/wpa_supplicant.conf"
     |> template()
-    |> String.replace("__WLAN_SSID__", inspect(config[:ssid] || "WLAN_SSID"))
-    |> String.replace("__WLAN_PASSWORD__", inspect(config[:psk] || "WLAN_PASSWORD"))
+    |> String.replace(["__WLAN_SSID__", "__WLAN_PASSWORD__"], fn
+      "__WLAN_SSID__" -> config[:ssid] || "WLAN_SSID"
+      "__WLAN_PASSWORD__" -> config[:psk] || "WLAN_PASSWORD"
+    end)
   end
 
   defp inetrc, do: template("grisp/grisp2/common/deploy/files/erl_inetrc")
@@ -351,6 +401,98 @@ defmodule GrispNew.Configure do
   end
 
   defp project_readme(config) do
+    rust =
+      if config[:rust],
+        do: """
+
+        The Rust example is `#{Macro.camelize(config[:name])}.RustNif.hello/0`.
+        Select a Rust-enabled GRiSP2 toolchain, then run `mix grisp.build` before
+        deploying. Host compilation uses the installed host Rust toolchain.
+
+        If you use the Docker toolchain and already have an older image locally,
+        update it before building:
+
+            docker pull grisp/grisp2-rtems-toolchain:latest
+        """,
+        else: ""
+
+    c_nif =
+      if config[:c_nif],
+        do: """
+
+        The C NIF example is `#{Macro.camelize(config[:name])}.CNif.hello/0`.
+        It is compiled into the GRiSP runtime; run `mix grisp.build` before
+        deploying. The C NIF is available on the target runtime.
+        """,
+        else: ""
+
+    grisp_io =
+      if config[:grisp_io],
+        do: """
+
+        ## GRiSP.io
+
+        ### Link a device
+
+        If you did not configure a linking token, copy one from
+        [GRiSP.io Devices](https://app.grisp.io/grisp-manager/devices) and run
+        this once in the device shell:
+
+            :grisp_connect.link_device("TOKEN")
+
+        ### Publish an update
+
+        For projects with NIFs, build the custom OTP first:
+
+            mix grisp.build
+
+        Build a local update package:
+
+            mix grisp.pack
+
+        Authenticate before using the GRiSP.io commands for the first time. Your
+        credentials are saved for later commands; then upload the package:
+
+            mix grisp-io.auth
+            mix grisp-io.upload
+
+        Upload builds the package if it does not exist locally. Use `--refresh`
+        to rebuild an existing package or `--force` to replace an uploaded
+        package.
+
+        ### Deploy an update
+
+        Use the GRiSP.io web interface to start an update from the device's
+        **Device Details** page. It shows progress and lets you reboot and
+        validate. You can also start an update from the command line:
+
+            mix grisp-io.deploy --device SERIAL
+
+        If the update requests a reboot, reboot from the web interface or
+        command line. Validate after the device reconnects:
+
+            mix grisp-io.reboot --device SERIAL
+            mix grisp-io.validate --device SERIAL
+
+        > **Warning:** Updates install to internal eMMC, not the SD card. If the
+        > board booted from an SD card, eject it before rebooting after the
+        > update. Otherwise the board will start the old system from the SD
+        > card. If validation reports
+        > `Error: device needs to be rebooted`, reboot and reconnect the device,
+        > then validate again. An update that is not validated can roll back on
+        > the next reboot.
+
+        ### Manage packages
+
+        Manage uploaded packages in the web interface, or use these commands.
+        `PACKAGE` is the filename shown by `mix grisp-io.list`, not the local
+        package file name:
+
+            mix grisp-io.list
+            mix grisp-io.delete PACKAGE
+        """,
+        else: ""
+
     """
     # #{config[:name]}
 
@@ -359,11 +501,196 @@ defmodule GrispNew.Configure do
     ## Build
 
         mix compile
+    #{rust}
+    #{c_nif}
 
     ## Deploy
 
         mix grisp.deploy --relname #{config[:name]} --relvsn 0.1.0
+    #{grisp_io}
     """
+  end
+
+  defp native_files(root, config, preserve?) do
+    if config[:rust] or config[:c_nif] do
+      ignore_path = Path.join(root, ".gitignore")
+      ignored = if File.regular?(ignore_path), do: File.read!(ignore_path), else: ""
+
+      ignore =
+        write(
+          ignore_path,
+          ignored <>
+            "\n# GRiSP and native build artifacts\n/_grisp/\n/priv/native/\n" <>
+            if(config[:rust], do: "/native/target/\n", else: ""),
+          preserve?
+        )
+
+      c_nif_files =
+        if config[:c_nif] do
+          name = config[:name]
+
+          [
+            write_elixir(
+              Path.join(root, "lib/#{name}/c_nif.ex"),
+              """
+              defmodule #{Macro.camelize(name)}.CNif do
+                @moduledoc false
+
+                @on_load :load_nif
+
+                @doc false
+                def load_nif do
+                  case :os.type() do
+                    {:unix, :rtems} -> :erlang.load_nif(:erlang.atom_to_list(__MODULE__), 0)
+                    _ -> :ok
+                  end
+                end
+
+                def hello, do: :erlang.nif_error(:nif_not_loaded)
+              end
+              """,
+              preserve?
+            ),
+            write(
+              Path.join(root, "grisp/default/common/build/nifs/#{name}_c_nif.c"),
+              c_nif_source(name),
+              preserve?
+            )
+          ]
+        else
+          []
+        end
+
+      [ignore | c_nif_files]
+    else
+      []
+    end
+  end
+
+  defp c_nif_source(name) do
+    """
+    #ifdef __rtems__
+    /* Keep the static init symbol independent of the Elixir module name. */
+    #define STATIC_ERLANG_NIF_LIBNAME #{name}_c
+    #endif
+
+    #include <erl_nif.h>
+
+    static ERL_NIF_TERM hello(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+    {
+        (void)argc;
+        (void)argv;
+        return enif_make_string(env, "Hello from a C NIF", ERL_NIF_LATIN1);
+    }
+
+    static ErlNifFunc nif_funcs[] = {
+        {"hello", 0, hello, 0}
+    };
+
+    ERL_NIF_INIT(Elixir.#{Macro.camelize(name)}.CNif, nif_funcs, NULL, NULL, NULL, NULL)
+    """
+  end
+
+  defp rust_files(root, config, preserve?) do
+    if config[:rust] do
+      name = config[:name]
+      module = Macro.camelize(name)
+
+      [
+        write_elixir(
+          Path.join(root, "lib/#{name}/rust_nif.ex"),
+          """
+          defmodule #{module}.RustNif do
+            @grisp_target System.get_env("GRISP") == "yes"
+
+            if @grisp_target do
+              @on_load :load_nif
+
+              @doc false
+              def load_nif do
+                case :os.type() do
+                  {:unix, :rtems} ->
+                    :code.purge(__MODULE__)
+
+                    load_path =
+                      :#{name}
+                      |> Application.app_dir("priv/native/#{name}_native")
+                      |> to_charlist()
+
+                    :erlang.load_nif(load_path, 0)
+
+                  _ ->
+                    :ok
+                end
+              end
+            else
+              use Rustler,
+                otp_app: :#{name},
+                crate: "#{name}_native",
+                path: "native/#{name}_native"
+            end
+
+            @doc false
+            def __mix_recompile__?, do: (System.get_env("GRISP") == "yes") != @grisp_target
+
+            def hello, do: :erlang.nif_error(:nif_not_loaded)
+          end
+          """,
+          preserve?
+        ),
+        write(
+          Path.join(root, "native/Cargo.toml"),
+          """
+          [workspace]
+          resolver = "2"
+          members = ["#{name}_native"]
+          """,
+          preserve?
+        ),
+        write(
+          Path.join(root, "native/#{name}_native/Cargo.toml"),
+          """
+          [package]
+          name = "#{name}_native"
+          version = "0.1.0"
+          edition = "2021"
+
+          [lib]
+          crate-type = ["cdylib", "rlib"]
+
+          [dependencies]
+          rustler = { version = "0.39.0", features = ["allocator", "nif_version_2_17"] }
+          """,
+          preserve?
+        ),
+        write(
+          Path.join(root, "native/#{name}_native/src/lib.rs"),
+          """
+          #[rustler::nif]
+          fn hello() -> &'static str {
+              "Hello from a Rust NIF"
+          }
+
+          rustler::init!("Elixir.#{module}.RustNif");
+          """,
+          preserve?
+        ),
+        write(
+          Path.join(root, ".cargo/config.toml"),
+          """
+          [profile.release]
+          panic = "unwind"
+          opt-level = "s"      # optimize for size, not speed
+          lto = true           # whole-program dead-code elimination across crates
+          codegen-units = 1    # give the optimizer a single unit to work on
+          strip = "symbols"    # strip symbol tables from the final artifact
+          """,
+          preserve?
+        )
+      ]
+    else
+      []
+    end
   end
 
   defp license(config) do

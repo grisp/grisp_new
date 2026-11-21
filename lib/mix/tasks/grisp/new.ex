@@ -17,6 +17,8 @@ defmodule Mix.Tasks.Grisp.New do
     name: :string,
     otp_version: :string,
     jit: :string,
+    rust: :boolean,
+    c_nif: :boolean,
     dest: :string,
     desc: :string,
     copyright_year: :string,
