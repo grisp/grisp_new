@@ -6,7 +6,7 @@ defmodule GrispNew.MixProject do
   def project do
     [
       app: :grisp_new,
-      version: "1.0.1",
+      version: "1.1.0",
       elixir: "~> 1.20",
       description: "Standalone Mix archive for creating GRiSP projects.",
       deps: deps(),

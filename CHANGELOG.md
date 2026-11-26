@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-26
+
+### Added
+
+- Add the Mix package release workflow (#2)
+- Add support for Rust NIFs (#1)
+
+
+### Changed
+
+- Update README
+
 ## [1.0.1] - 2026-09-16
 
 ### Fixed
@@ -27,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Use Git or Mercurial identity settings as author defaults, with anonymous
   values when neither is configured.
 
-[Unreleased]: https://github.com/grisp/grisp_new/compare/1.0.1...HEAD
+[Unreleased]: https://github.com/grisp/grisp_new/compare/1.1.0...HEAD
+[1.1.0]: https://github.com/grisp/grisp_new/compare/1.0.1...1.1.0
 [1.0.1]: https://github.com/grisp/grisp_new/compare/1.0.0...1.0.1
 [1.0.0]: https://github.com/grisp/grisp_new/releases/tag/1.0.0
