@@ -1,13 +1,12 @@
 defmodule GrispNew.MixProject do
   use Mix.Project
 
-  @version "1.0.1"
   @source_url "https://github.com/grisp/grisp_new"
 
   def project do
     [
       app: :grisp_new,
-      version: @version,
+      version: "1.0.1",
       elixir: "~> 1.20",
       description: "Standalone Mix archive for creating GRiSP projects.",
       deps: deps(),
@@ -28,7 +27,7 @@ defmodule GrispNew.MixProject do
       licenses: ["Apache-2.0"],
       links: %{
         "GitHub" => @source_url,
-        "Changelog" => "#{@source_url}/blob/master/CHANGELOG.md"
+        "Changelog" => "#{@source_url}/blob/main/CHANGELOG.md"
       }
     ]
   end
