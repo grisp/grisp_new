@@ -176,6 +176,8 @@ defmodule GrispNew.ConfigureTest do
     assert mix =~ "https://github.com/grisp/erlang-cargo.git"
     assert mix =~ ~s(branch: "cross_build_support_0_1_3")
     assert mix =~ ~s({:rustler, "~> 0.38.0", runtime: false})
+    assert mix =~ ~s({:grisp, "~> 2.13"})
+    assert mix =~ ~s({:mix_grisp, ">= 1.2.1 and < 2.0.0", runtime: false})
     assert mix =~ ~s(cargo_opts: [src_dir: "native"])
     assert mix =~ "build: [toolchain:"
     assert mix =~ "preferred_envs:"
@@ -348,7 +350,7 @@ defmodule GrispNew.ConfigureTest do
     assert mix_exs =~ ~s({:grisp_connect, "~> 3.0.0"})
     assert mix_exs =~ ~s({:grisp_updater_grisp2, "~> 1.0", runtime: false})
     assert mix_exs =~ ~s({:mix_grisp_io, "~> 1.0", runtime: false})
-    assert mix_exs =~ ~s({:grisp, "~> 2.12", override: true})
+    assert mix_exs =~ ~s({:grisp, "~> 2.13", override: true})
     assert mix_exs =~ "applications: [sasl: :permanent, grisp_updater_grisp2: :load]"
 
     assert config_exs =~ "config :grisp_keychain"
