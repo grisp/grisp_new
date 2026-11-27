@@ -277,8 +277,8 @@ defmodule GrispNew.Configure do
 
     grisp_dep =
       if config[:grisp_io],
-        do: "{:grisp, \"~> 2.12\", override: true}",
-        else: "{:grisp, \"~> 2.12\"}"
+        do: "{:grisp, \"~> 2.13\", override: true}",
+        else: "{:grisp, \"~> 2.13\"}"
 
     grisp_io_release_apps =
       if config[:grisp_io],
@@ -314,7 +314,7 @@ defmodule GrispNew.Configure do
       defp deps do
         [#{epmd_dep}#{grisp_io_deps}#{rust_deps}
           #{grisp_dep},
-          {:mix_grisp, "~> 1.0", runtime: false}
+          {:mix_grisp, ">= 1.2.1 and < 2.0.0", runtime: false}
         ]
       end
 
